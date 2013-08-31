@@ -27,7 +27,6 @@ let s:version       = "1.0.2"
 
 let g:loaded_QFGrep = 1
 
-let g:origQF        = !exists("g:origQF")? [] : g:origQF
 
 "mappings
 let g:QFG_Grep      = !exists('g:QFG_Grep')? '<Leader>g' : g:QFG_Grep
@@ -38,12 +37,6 @@ let g:QFG_Restore   = !exists('g:QFG_Restore')? '<Leader>r' : g:QFG_Restore
 if !exists('g:QFG_hi_prompt')
   let g:QFG_hi_prompt='ctermbg=68 ctermfg=16 guibg=#5f87d7 guifg=black'
 endif
-
-"a buffer variable, to store a flag, if current buffer is :
-"quickfix_list (1) (default)
-"location_list(0)
-" This variable must be set when the buffer loaded
-let b:isQF = 1
 
 
 if !exists('g:QFG_hi_info')
@@ -56,6 +49,14 @@ endif
 
 "the message header
 let s:msgHead = '[QFGrep] ' 
+
+
+"a buffer variable, to store a flag, if current buffer is :
+"quickfix_list (1) (default)
+"location_list(0)
+" This variable must be set when the buffer loaded
+let b:isQF = 1
+
 
 
 "Abstract the getqflist() or getloclist(nr)
@@ -72,8 +73,8 @@ endfunction
 "do grep on quickfix entries
 function! <SID>GrepQuickFix(invert)
   "store original quickfix lists, so that later could be restored
-  let g:origQF = len( g:origQF )>0? g:origQF : getqflist()
-  let all = getqflist()
+  let b:origQF = len( b:origQF )>0? b:origQF : <SID>GetList()
+  let all = <SID>GetList()
   if empty(all)
     call PrintErrMsg('Quickfix window is empty. Nothing could be grepped. ')
     return
@@ -105,7 +106,7 @@ function! <SID>GrepQuickFix(invert)
     if empty(cp)
       call PrintErrMsg('Empty resultset, aborted.')
     else		"found entries
-      call setqflist(cp)
+      call <SID>SetList(cp)
       call PrintHLInfo(len(cp) . ' entries in Grep result.')
     endif
   catch /^Vim\%((\a\+)\)\=:E/
@@ -116,8 +117,8 @@ endfunction
 
 
 fun! <SID>RestoreQuickFix()
-  if len(g:origQF) > 0
-    call setqflist(g:origQF)
+  if len(b:origQF) > 0
+    call <SID>SetList(b:origQF)
     call PrintHLInfo('Quickfix entries restored.')
   else
     call PrintErrMsg("Nothing can be restored")
@@ -143,9 +144,23 @@ endf
 "check the current buffer is quickfix list or location list
 "return 1 if qf-list, 0 for location list
 fun! <SID>WhichListIAmIn()
-" FIXME hardcoded 1
-  let b:isQF = 1
+  try
+    let t = w:quickfix_title
+    return  ( match(t,"^:l") == 0 || match(t, "^setloclist(") == 0  )? 0 : 1
+
+    "if exception occured, it is quickfix. Because this only happens when user open an empty quickfix window by :copen. and user cannot open an empty locationlist window by :lopen
+  catch /E/
+    return 1
+  endtry
 endf
+
+function! <SID>Init()
+  
+    "let b:origQF = exists(b:origQF) ? b:origQF:[]
+    let b:isQF   =  <SID>WhichListIAmIn()
+    let b:origQF  = exists("b:origQF")? b:origQF : <SID>GetList()
+
+endfunction
 
 "autocommands 
 fun! <SID>FTautocmdBatch()
@@ -155,24 +170,27 @@ fun! <SID>FTautocmdBatch()
   command! QFGrep    call <SID>GrepQuickFix(0)  "invert flag =0
   command! QFGrepV   call <SID>GrepQuickFix(1)  "invert flag =1
   command! QFRestore call <SID>RestoreQuickFix()
-  command! QFGrepVersion echo "QFGrep Version: " . s:version
   "mapping
   execute 'nnoremap <buffer><silent>' . g:QFG_Grep    . ' :QFGrep<cr>'
   execute 'nnoremap <buffer><silent>' . g:QFG_GrepV   . ' :QFGrepV<cr>'
   execute 'nnoremap <buffer><silent>' . g:QFG_Restore . ' :QFRestore<cr>'
-
-  "decide it is quickfix list or location list
-  call <SID>WhichListIAmIn()
 endf
 
 
 
 augroup QFG
+  "FIXME how to handle the loclist&qflist buffer. 
   au!
-  autocmd QuickFixCmdPre * let g:origQF = []
-  autocmd QuickFixCmdPost * let g:origQF = getqflist() 
+  autocmd QuickFixCmdPre * let b:origQF = []
+  "autocmd QuickFixCmdPost * call <SID>Init()
+  autocmd BufReadPost quickfix call <SID>Init()
+  "autocmd BufAdd quickfix echo "bang"|call <SID>Init()
+  "autocmd BufDelete quickfix call <SID>RestoreQuickFix()
   autocmd FileType qf call <SID>FTautocmdBatch()
+  
 augroup end
 
+"command to show version number
+command! QFGrepVersion echo "QFGrep Version: " . s:version
 
 " vim: ts=2:tw=80:shiftwidth=2:tabstop=2:fdm=marker:expandtab:
